@@ -285,7 +285,7 @@ public class Preferences extends AppCompatPreferenceActivity implements Preferen
                     return true;
                 });
                 // Make it possible to test crash reporting, but only for DEBUG builds
-                if (BuildConfig.DEBUG) {
+                if (false && BuildConfig.DEBUG) {
                     Timber.i("Debug mode, allowing for test crashes");
                     Preference triggerTestCrashPreference = new Preference(this);
                     triggerTestCrashPreference.setKey("trigger_crash_preference");
