@@ -27,6 +27,7 @@ import com.ichi2.anki.exception.UnknownHttpResponseException;
 import com.ichi2.async.Connection;
 import com.ichi2.libanki.Collection;
 import com.ichi2.libanki.Consts;
+import com.ichi2.libanki.Sched;
 import com.ichi2.libanki.Utils;
 
 import org.json.JSONArray;
@@ -42,6 +43,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import okhttp3.Response;
 import timber.log.Timber;
 
 @SuppressWarnings({"deprecation", // tracking HTTP transport change in github already
@@ -55,6 +57,9 @@ public class Syncer {
     public static final int TYPE_FLOAT = 2;
     public static final int TYPE_STRING = 3;
     public static final int TYPE_BLOB = 4;
+
+    /** The libAnki value of `sched.mReportLimit` */
+    private static final int SYNC_SCHEDULER_REPORT_LIMIT = 1000;
 
     private Collection mCol;
     private HttpSyncer mServer;
@@ -84,17 +89,16 @@ public class Syncer {
     }
 
 
-    @SuppressWarnings("deprecation") // tracking HTTP transport change in github already
     public Object[] sync(Connection con) throws UnknownHttpResponseException {
         mSyncMsg = "";
         // if the deck has any pending changes, flush them first and bump mod time
         mCol.save();
         // step 1: login & metadata
-        org.apache.http.HttpResponse ret = mServer.meta();
+        Response ret = mServer.meta();
         if (ret == null) {
             return null;
         }
-        int returntype = ret.getStatusLine().getStatusCode();
+        int returntype = ret.code();
         if (returntype == 403) {
             return new Object[] { "badAuth" };
         }
@@ -102,7 +106,7 @@ public class Syncer {
             mCol.getDb().getDatabase().beginTransaction();
             try {
                 Timber.i("Sync: getting meta data from server");
-                JSONObject rMeta = new JSONObject(mServer.stream2String(ret.getEntity().getContent()));
+                JSONObject rMeta = new JSONObject(ret.body().string());
                 mCol.log("rmeta", rMeta);
                 mSyncMsg = rMeta.getString("msg");
                 if (!rMeta.getBoolean("cont")) {
@@ -250,7 +254,7 @@ public class Syncer {
         j.put("mod", mCol.getMod());
         j.put("scm", mCol.getScm());
         j.put("usn", mCol.getUsnForSync());
-        j.put("ts", Utils.intNow());
+        j.put("ts", Utils.intTime());
         j.put("musn", 0);
         j.put("msg", "");
         j.put("cont", true);
@@ -377,7 +381,11 @@ public class Syncer {
             // return summary of deck
             JSONArray ja = new JSONArray();
             JSONArray sa = new JSONArray();
-            for (int c : mCol.getSched().counts()) {
+
+            //#5666 - not in libAnki
+            //We modified mReportLimit inside the scheduler, and this causes issues syncing dynamic decks.
+            Sched syncScheduler = mCol.createScheduler(SYNC_SCHEDULER_REPORT_LIMIT);
+            for (int c : syncScheduler.recalculateCounts()) {
                 sa.put(c);
             }
             ja.put(sa);
@@ -427,7 +435,7 @@ public class Syncer {
     private long finish(long mod) {
         if (mod == 0) {
             // server side; we decide new mod time
-            mod = Utils.intNow(1000);
+            mod = Utils.intTime(1000);
         }
         mCol.setLs(mod);
         mCol.setUsnAfterSync(mMaxUsn + 1);

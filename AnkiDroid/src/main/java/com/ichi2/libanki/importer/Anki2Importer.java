@@ -102,6 +102,7 @@ public class Anki2Importer extends Importer {
             }
         } catch (RuntimeException e) {
             Timber.e(e, "RuntimeException while importing");
+            throw new ImportExportException(e.getMessage());
         }
     }
 
@@ -354,7 +355,7 @@ public class Anki2Importer extends Importer {
                     // copy it over
                     JSONObject model = new JSONObject(Utils.jsonToString(srcModel));
                     model.put("id", mid);
-                    model.put("mod", Utils.intNow());
+                    model.put("mod", Utils.intTime());
                     model.put("usn", mCol.usn());
                     mDst.getModels().update(model);
                     break;
@@ -366,7 +367,7 @@ public class Anki2Importer extends Importer {
                     // they do; we can reuse this mid
                     JSONObject model = new JSONObject(Utils.jsonToString(srcModel));
                     model.put("id", mid);
-                    model.put("mod", Utils.intNow());
+                    model.put("mod", Utils.intTime());
                     model.put("usn", mCol.usn());
                     mDst.getModels().update(model);
                     break;
@@ -528,7 +529,7 @@ public class Anki2Importer extends Importer {
                 // update cid, nid, etc
                 card[1] = mNotes.get(guid)[0];
                 card[2] = _did((Long) card[2]);
-                card[4] = Utils.intNow();
+                card[4] = Utils.intTime();
                 card[5] = usn;
                 // review cards have a due date relative to collection
                 if ((Integer) card[7] == 2 || (Integer) card[7] == 3 || (Integer) card[6] == 2) {
@@ -647,8 +648,16 @@ public class Anki2Importer extends Importer {
             // Mark file addition to media db (see note in Media.java)
             mDst.getMedia().markFileAdd(fname);
         } catch (IOException e) {
+
             // the user likely used subdirectories
             Timber.e(e, "Error copying file %s.", fname);
+
+            // If we are out of space, we should re-throw
+            if (e.getCause() != null && e.getCause().getMessage().contains("No space left on device")) {
+                // we need to let the user know why we are failing
+                Timber.e("We are out of space, bubbling up the file copy exception");
+                throw new RuntimeException(e);
+            }
         }
     }
 

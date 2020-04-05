@@ -95,10 +95,11 @@ public class Utils {
     private Utils() { }
 
     // Regex pattern used in removing tags from text before diff
-    private static final Pattern stylePattern = Pattern.compile("(?s)<style.*?>.*?</style>");
-    private static final Pattern scriptPattern = Pattern.compile("(?s)<script.*?>.*?</script>");
+    private static final Pattern stylePattern = Pattern.compile("(?si)<style.*?>.*?</style>");
+    private static final Pattern scriptPattern = Pattern.compile("(?si)<script.*?>.*?</script>");
     private static final Pattern tagPattern = Pattern.compile("<.*?>");
-    private static final Pattern imgPattern = Pattern.compile("<img src=[\\\"']?([^\\\"'>]+)[\\\"']? ?/?>");
+    private static final Pattern imgPattern = Pattern.compile("(?i)<img src=[\\\"']?([^\\\"'>]+)[\\\"']? ?/?>");
+    private static final Pattern soundPattern = Pattern.compile("(?i)\\[sound:([^]]+)\\]");
     private static final Pattern htmlEntitiesPattern = Pattern.compile("&#?\\w+;");
 
     private static final String ALL_CHARACTERS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -113,15 +114,18 @@ public class Utils {
 
 
     /**The time in integer seconds. Pass scale=1000 to get milliseconds. */
-    public static long intNow() {
-        return intNow(1);
+    public static long intTime() {
+        return intTime(1);
     }
-    public static long intNow(int scale) {
+    public static long intTime(int scale) {
         return (long) (now() * scale);
     }
 
     /**
      * Return a string representing a time quantity
+     *
+     * Equivalent to Anki's anki/utils.py's shortTimeFmt, applied to a number.
+     * I.e. equivalent to Anki's anki/utils.py's fmtTimeSpan, with the parameter short=True.
      *
      * @param context The application's environment.
      * @param time_s The time to format, in seconds
@@ -153,6 +157,7 @@ public class Utils {
      * @param context The application's environment.
      * @param time_s The time to format, in seconds
      * @return The formatted, localized time string. The time is always an integer.
+     *  e.g. something like "3 seconds" or "1 year".
      */
     public static String timeSpan(Context context, long time_s) {
         int time_x;  // Time in unit x
@@ -180,6 +185,8 @@ public class Utils {
 
     /**
      * Return a proper string for a time value in seconds
+     *
+     * Similar to Anki anki/utils.py's fmtTimeSpan.
      *
      * @param context The application's environment.
      * @param time_s The time to format, in seconds
@@ -230,6 +237,14 @@ public class Utils {
     public static String stripHTMLMedia(String s) {
         Matcher imgMatcher = imgPattern.matcher(s);
         return stripHTML(imgMatcher.replaceAll(" $1 "));
+    }
+
+    /**
+     * Strip sound but keep media filenames
+     */
+    public static String stripSoundMedia(String s) {
+        Matcher soundMatcher = soundPattern.matcher(s);
+        return soundMatcher.replaceAll(" $1 ");
     }
 
 
@@ -355,7 +370,7 @@ public class Utils {
     public static long timestampID(DB db, String table) {
         // be careful not to create multiple objects without flushing them, or they
         // may share an ID.
-        long t = intNow(1000);
+        long t = intTime(1000);
         while (db.queryScalar("SELECT id FROM " + table + " WHERE id = " + t) != 0) {
             t += 1;
         }
@@ -365,7 +380,7 @@ public class Utils {
 
     /** Return the first safe ID to use. */
     public static long maxID(DB db) {
-        long now = intNow(1000);
+        long now = intTime(1000);
         now = Math.max(now, db.queryLongScalar("SELECT MAX(id) FROM cards"));
         now = Math.max(now, db.queryLongScalar("SELECT MAX(id) FROM notes"));
         return now + 1;
@@ -641,6 +656,7 @@ public class Utils {
                 success = true;
             } catch (IOException e) {
                 if (retryCnt == retries) {
+                    Timber.e("IOException while writing to file, out of retries.");
                     throw e;
                 } else {
                     Timber.e("IOException while writing to file, retrying...");
@@ -835,14 +851,11 @@ public class Utils {
     public static List<File> getImportableDecks(Context context) {
         String deckPath = CollectionHelper.getCurrentAnkiDroidDirectory(context);
         File dir = new File(deckPath);
-        int deckCount = 0;
-        File[] deckList = null;
-        if (dir.exists() && dir.isDirectory()) {
-            deckList = dir.listFiles(pathname -> pathname.isFile() && pathname.getName().endsWith(".apkg"));
-            deckCount = deckList.length;
-        }
         List<File> decks = new ArrayList<>();
-        decks.addAll(Arrays.asList(deckList).subList(0, deckCount));
+        if (dir.exists() && dir.isDirectory()) {
+            File[] deckList = dir.listFiles(pathname -> pathname.isFile() && pathname.getName().endsWith(".apkg"));
+            decks.addAll(Arrays.asList(deckList).subList(0, deckList.length));
+        }
         return decks;
     }
 

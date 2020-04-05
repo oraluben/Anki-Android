@@ -72,6 +72,7 @@ import com.ichi2.libanki.Note;
 import com.ichi2.libanki.Utils;
 import com.ichi2.themes.Themes;
 import com.ichi2.upgrade.Upgrade;
+import com.ichi2.utils.LanguageUtil;
 import com.ichi2.widget.WidgetStatus;
 
 import org.json.JSONException;
@@ -142,9 +143,9 @@ public class CardBrowser extends NavigationDrawerActivity implements
         "cardEase",
         "cardReps",
         "cardLapses"};
+    private static final String[] COLUMN1_KEYS = {"question", "sfld"};
     // list of available keys in mCards corresponding to the column names in R.array.browser_column2_headings.
     // Note: the last 6 are currently hidden
-    private static final String[] COLUMN1_KEYS = {"question", "sfld"};
     private static final String[] COLUMN2_KEYS = {"answer",
         "card",
         "deck",
@@ -153,12 +154,13 @@ public class CardBrowser extends NavigationDrawerActivity implements
         "tags",
         "lapses",
         "reviews",
+        "interval",
+        "ease",
+        "due",
         "changed",
         "created",
-        "due",
-        "ease",
         "edited",
-        "interval"};
+    };
     private long mLastRenderStart = 0;
     private DeckDropDownAdapter mDropDownAdapter;
     private Spinner mActionBarSpinner;
@@ -467,6 +469,10 @@ public class CardBrowser extends NavigationDrawerActivity implements
             if (mOrder == 1 && preferences.getBoolean("cardBrowserNoSorting", false)) {
                 mOrder = 0;
             }
+            //This upgrade should already have been done during
+            //setConf. However older version of AnkiDroid didn't call
+            //upgradeJSONIfNecessary during setConf, which means the
+            //conf saved may still have this bug.
             mOrderAsc = Upgrade.upgradeJSONIfNecessary(getCol(), getCol().getConf(), "sortBackwards", false);
             // default to descending for non-text fields
             if (fSortTypes[mOrder].equals("noteFld")) {
@@ -523,6 +529,9 @@ public class CardBrowser extends NavigationDrawerActivity implements
                             .putInt("cardBrowserColumn2", mColumn2Index).commit();
                     String[] fromMap = mCardsAdapter.getFromMapping();
                     fromMap[1] = COLUMN2_KEYS[mColumn2Index];
+                    if (fromMap[1] == null) {
+                        fromMap[1] = "";
+                    }
                     mCardsAdapter.setFromMapping(fromMap);
                 }
             }
@@ -535,11 +544,15 @@ public class CardBrowser extends NavigationDrawerActivity implements
         // get the font and font size from the preferences
         int sflRelativeFontSize = preferences.getInt("relativeCardBrowserFontSize", DEFAULT_FONT_SIZE_RATIO);
         String sflCustomFont = preferences.getString("browserEditorFont", "");
+        String[] columnsContent = {COLUMN1_KEYS[mColumn1Index], COLUMN2_KEYS[mColumn2Index]};
+        if (columnsContent[1] == null) {
+            columnsContent[1] = "";
+        }
         // make a new list adapter mapping the data in mCards to column1 and column2 of R.layout.card_item_browser
         mCardsAdapter = new MultiColumnListAdapter(
                 this,
                 R.layout.card_item_browser,
-                new String[] {COLUMN1_KEYS[mColumn1Index], COLUMN2_KEYS[mColumn2Index]},
+                columnsContent,
                 new int[] {R.id.card_sfld, R.id.card_column2},
                 "flags",
                 sflRelativeFontSize,
@@ -1134,7 +1147,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
         }
         if (colIsOpen() && mCardsAdapter!= null) {
             // clear the existing card list
-            getCards().clear();
+            mCards = new ArrayList<Map<String, String>>();
             mCardsAdapter.notifyDataSetChanged();
             //  estimate maximum number of cards that could be visible (assuming worst-case minimum row height of 20dp)
             int numCardsToRender = (int) Math.ceil(mCardsListView.getHeight()/
@@ -1218,7 +1231,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
             String sfld = note.getSFld();
             getCards().get(pos).put("sfld", sfld);
             // update Q & A etc
-            updateSearchItemQA(getCards().get(pos), c);
+            updateSearchItemQA(getBaseContext(), getCards().get(pos), c);
             // update deck
             String deckName;
             try {
@@ -1291,8 +1304,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
         }
     };
 
-
-    public static void updateSearchItemQA(Map<String, String> item, Card c) {
+    public static void updateSearchItemQA(Context context, Map<String, String> item, Card c) {
         // render question and answer
         Map<String, String> qa = c._getQA(true, true);
         // Render full question / answer if the bafmt (i.e. "browser appearance") setting forced blank result
@@ -1316,12 +1328,25 @@ public class CardBrowser extends NavigationDrawerActivity implements
         // database
         item.put("answer", formatQA(a));
         item.put("card", c.template().optString("name"));
-        // item.put("changed",strftime("%Y-%m-%d", localtime(c.getMod())));
-        // item.put("created",strftime("%Y-%m-%d", localtime(c.note().getId()/1000)));
-        // item.put("due",getDueString(c));
-        // item.put("ease","");
-        // item.put("edited",strftime("%Y-%m-%d", localtime(c.note().getMod())));
-        // item.put("interval","");
+        item.put("due", c.getDueString());
+        if (c.getType() == 0) {
+            item.put("ease", context.getString(R.string.card_browser_ease_new_card));
+        } else {
+            item.put("ease", (c.getFactor()/10)+"%");
+        }
+
+        item.put("changed", LanguageUtil.getShortDateFormatFromS(c.getMod()));
+        item.put("created", LanguageUtil.getShortDateFormatFromMs(c.note().getId()));
+        item.put("edited", LanguageUtil.getShortDateFormatFromS(c.note().getMod()));
+        // interval
+        int type = c.getType();
+        if (type == 0) {
+            item.put("interval", context.getString(R.string.card_browser_interval_new_card));
+        } else if (type == 1) {
+            item.put("interval", context.getString(R.string.card_browser_interval_learning_card));
+        } else {
+            item.put("interval", Utils.timeSpan(context, c.getIvl()*86400));
+        }
         item.put("lapses", Integer.toString(c.getLapses()));
         item.put("note", c.model().optString("name"));
         item.put("question", formatQA(q));
@@ -1335,7 +1360,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
         s = s.replace("<br />", " ");
         s = s.replace("<div>", " ");
         s = s.replace("\n", " ");
-        s = s.replaceAll("\\[sound:[^]]+\\]", "");
+        s = Utils.stripSoundMedia(s);
         s = s.replaceAll("\\[\\[type:[^]]+\\]\\]", "");
         s = Utils.stripHTMLMedia(s);
         s = s.trim();
@@ -1590,7 +1615,7 @@ public class CardBrowser extends NavigationDrawerActivity implements
                 String firstAns = getCards().get(firstVisibleItem).get("answer");
                 // Note: max value of lastVisibleItem is totalItemCount, so need to subtract 1
                 String lastAns = getCards().get(lastVisibleItem - 1).get("answer");
-                if ("".equals(firstAns) || "".equals(lastAns)) {
+                if (firstAns == null || lastAns == null) {
                     showProgressBar();
                     // Also start rendering the items on the screen every 300ms while scrolling
                     long currentTime = SystemClock.elapsedRealtime ();

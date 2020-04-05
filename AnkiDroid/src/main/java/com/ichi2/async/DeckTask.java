@@ -855,8 +855,8 @@ public class DeckTask extends BaseAsyncTask<DeckTask.TaskData, DeckTask.TaskData
         List<Map<String,String>> searchResult = col.findCardsForCardBrowser(query, order, deckNames);
         // Render the first few items
         for (int i = 0; i < Math.min(numCardsToRender, searchResult.size()); i++) {
-            Card c = col.getCard(Long.parseLong(searchResult.get(i).get("id"), 10));
-            CardBrowser.updateSearchItemQA(searchResult.get(i), c);
+            Card c = col.getCard(Long.parseLong(searchResult.get(i).get("id")));
+            CardBrowser.updateSearchItemQA(mContext, searchResult.get(i), c);
         }
         // Finish off the task
         if (isCancelled()) {
@@ -870,6 +870,8 @@ public class DeckTask extends BaseAsyncTask<DeckTask.TaskData, DeckTask.TaskData
 
 
     private TaskData doInBackgroundRenderBrowserQA(TaskData... params) {
+        //TODO: Convert this to accept the following to make thread-safe:
+        //(Range<Position>, Function<Position, BrowserCard>)
         Timber.d("doInBackgroundRenderBrowserQA");
         Collection col = CollectionHelper.getInstance().getCol(mContext);
         List<Map<String, String>> items = (List<Map<String, String>>) params[0].getObjArray()[0];
@@ -878,20 +880,43 @@ public class DeckTask extends BaseAsyncTask<DeckTask.TaskData, DeckTask.TaskData
 
         // for each specified card in the browser list
         for (int i = startPos; i < startPos + n; i++) {
-            if (i >= 0 && i < items.size() && items.get(i).get("answer").equals("")) {
-                // Extract card item
-                Card c = col.getCard(Long.parseLong(items.get(i).get("id"), 10));
-                // Update item
-                CardBrowser.updateSearchItemQA(items.get(i), c);
-                // Stop if cancelled
-                if (isCancelled()) {
-                    Timber.d("doInBackgroundRenderBrowserQA was aborted");
-                    return null;
-                } else {
-                    float progress = (float) i / n * 100;
-                    publishProgress(new TaskData((int) progress));
-                }
+            
+            // Stop if cancelled
+            if (isCancelled()) {
+                Timber.d("doInBackgroundRenderBrowserQA was aborted");
+                return null;
             }
+            if (i < 0 || i >= items.size()) {
+                continue;
+            }
+            Map<String, String> card;
+            try {
+                card = items.get(i);
+            }
+            catch (IndexOutOfBoundsException e) {
+                //even though we test against card.size() above, there's still a race condition
+                //We might be able to optimise this to return here. Logically if we're past the end of the collection,
+                //we won't reach any more cards.
+                continue;
+            }
+            if (card.get("answer") != null) {
+                //We've already rendered the answer, we don't need to do it again.
+                continue;
+            }
+            // Extract card item
+            Card c;
+            try {
+                c = col.getCard(Long.parseLong(card.get("id")));
+            } catch (Exception e) {
+                //#5891 - card can be inconsistent between the deck browser screen and the collection.
+                //Realistically, we can skip any exception as it's a rendering task which should not kill the
+                //process
+                continue;
+            }
+            // Update item
+            CardBrowser.updateSearchItemQA(mContext, card, c);
+            float progress = (float) i / n * 100;
+            publishProgress(new TaskData((int) progress));
         }
         return new TaskData(items);
     }
@@ -911,7 +936,7 @@ public class DeckTask extends BaseAsyncTask<DeckTask.TaskData, DeckTask.TaskData
             return new TaskData(false);
         } else {
             // Close the collection and we restart the app to reload
-            CollectionHelper.getInstance().closeCollection(true);
+            CollectionHelper.getInstance().closeCollection(true, "Check Database Completed");
             return new TaskData(0, result, true);
         }
     }
@@ -1052,7 +1077,7 @@ public class DeckTask extends BaseAsyncTask<DeckTask.TaskData, DeckTask.TaskData
         publishProgress(new TaskData(res.getString(R.string.importing_collection)));
         if (col != null) {
             // unload collection and trigger a backup
-            CollectionHelper.getInstance().closeCollection(true);
+            CollectionHelper.getInstance().closeCollection(true, "Importing new collection");
             CollectionHelper.getInstance().lockCollection();
             BackupManager.performBackupInBackground(colPath, true);
         }

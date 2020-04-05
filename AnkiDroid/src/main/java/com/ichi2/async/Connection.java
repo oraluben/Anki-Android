@@ -39,12 +39,14 @@ import com.ichi2.libanki.sync.MediaSyncer;
 import com.ichi2.libanki.sync.RemoteMediaServer;
 import com.ichi2.libanki.sync.RemoteServer;
 import com.ichi2.libanki.sync.Syncer;
+import com.ichi2.utils.Permissions;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
 
+import okhttp3.Response;
 import timber.log.Timber;
 
 public class Connection extends BaseAsyncTask<Connection.Payload, Object, Connection.Payload> {
@@ -125,8 +127,7 @@ public class Connection extends BaseAsyncTask<Connection.Payload, Object, Connec
     protected void onPreExecute() {
         super.onPreExecute();
         // Acquire the wake lock before syncing to ensure CPU remains on until the sync completes.
-        if (ContextCompat.checkSelfPermission(AnkiDroidApp.getInstance().getApplicationContext(),
-                Manifest.permission.WAKE_LOCK) == PackageManager.PERMISSION_GRANTED) {
+        if (Permissions.canUseWakeLock(AnkiDroidApp.getInstance().getApplicationContext())) {
             mWakeLock.acquire();
         }
         if (mListener != null) {
@@ -199,12 +200,11 @@ public class Connection extends BaseAsyncTask<Connection.Payload, Object, Connec
     }
 
 
-    @SuppressWarnings("deprecation") // tracking HTTP transport change in github already
     private Payload doInBackgroundLogin(Payload data) {
         String username = (String) data.data[0];
         String password = (String) data.data[1];
         HttpSyncer server = new RemoteServer(this, null);
-        org.apache.http.HttpResponse ret;
+        Response ret;
         try {
             ret = server.hostKey(username, password);
         } catch (UnknownHttpResponseException e) {
@@ -223,16 +223,16 @@ public class Connection extends BaseAsyncTask<Connection.Payload, Object, Connec
         String hostkey = null;
         boolean valid = false;
         if (ret != null) {
-            data.returnType = ret.getStatusLine().getStatusCode();
-            Timber.d("doInBackgroundLogin - response from server: %d, (%s)", data.returnType, ret.getStatusLine().getReasonPhrase());
+            data.returnType = ret.code();
+            Timber.d("doInBackgroundLogin - response from server: %d, (%s)", data.returnType, ret.message());
             if (data.returnType == 200) {
                 try {
-                    JSONObject jo = (new JSONObject(server.stream2String(ret.getEntity().getContent())));
+                    JSONObject jo = (new JSONObject(ret.body().string()));
                     hostkey = jo.getString("key");
                     valid = (hostkey != null) && (hostkey.length() > 0);
                 } catch (JSONException e) {
                     valid = false;
-                } catch (IllegalStateException | IOException e) {
+                } catch (IllegalStateException | IOException | NullPointerException e) {
                     throw new RuntimeException(e);
                 }
             }
@@ -256,6 +256,12 @@ public class Connection extends BaseAsyncTask<Connection.Payload, Object, Connec
                 msg.contains("SSLException while building HttpClient") ||
                 msg.contains("SocketTimeoutException") ||
                 msg.contains("ClientProtocolException") ||
+                msg.contains("deadline reached") ||
+                msg.contains("interrupted") ||
+                msg.contains("Failed to connect") ||
+                msg.contains("InterruptedIOException") ||
+                msg.contains("stream was reset") ||
+                msg.contains("ConnectionShutdownException") ||
                 msg.contains("TimeoutException");
     }
 
