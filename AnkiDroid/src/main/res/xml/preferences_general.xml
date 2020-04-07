@@ -51,10 +51,10 @@
             android:entryValues="@array/add_to_cur_values"
             android:key="useCurrent"
             android:title="@string/use_current" />
-        <ListPreference
-            android:defaultValue="@string/empty_string"
-            android:key="language"
-            android:title="@string/language" />
+<!--        <ListPreference-->
+<!--            android:defaultValue="@string/empty_string"-->
+<!--            android:key="language"-->
+<!--            android:title="@string/language" />-->
         <CheckBoxPreference
             android:defaultValue="false"
             android:key="analyticsOptIn"
